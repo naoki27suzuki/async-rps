@@ -1,0 +1,31 @@
+services:
+  python:
+    build: ./python
+    ports: ["8000:8000"]
+    cpus: "2"
+    environment:
+      CPU_LOOPS: "${PY_CPU_LOOPS:-10000000}"
+    # 起動方法は APP_CMD で切り替える（README 参照）
+    command: ${APP_CMD:-uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1}
+
+  go:
+    build: ./go
+    ports: ["8001:8000"]
+    cpus: "2"
+    environment:
+      GOMAXPROCS: "${GOMAXPROCS:-1}"
+      CPU_LOOPS: "${GO_CPU_LOOPS:-1000000000}"
+
+  locust:
+    image: locustio/locust
+    profiles: ["load"]
+    volumes:
+      - ./locust:/mnt/locust:ro
+      - ./results:/mnt/results
+    environment:
+      TARGET: "${TARGET:-/async-block}"
+    command: >
+      -f /mnt/locust/locustfile.py --headless
+      -u ${USERS:-300} -r ${SPAWN_RATE:-10} -t ${DURATION:-45s}
+      --host ${HOST:-http://python:8000}
+      --csv /mnt/results/${RUN_ID:-manual}
