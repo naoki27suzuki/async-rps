@@ -13,6 +13,56 @@
 DURATION=45s ./scripts/run_all.sh
 ```
 
+全9構成を順番に測り、最後に結果を表にまとめて出します。
+
+- 始めるときに、`results/` にある前回の結果を消します
+- 途中で Ctrl+C を押すと、その時点で止まります。表は出ないので、最初からやり直してください
+- 失敗したリクエストがあっても、止めずに次の構成へ進みます。同期で待つ構成（`py-async-block` など）では、ループが止まっている間に接続が切られ、`Connection reset by peer` で失敗することがあります
+
+### 進み具合を見る
+
+計測中に別のターミナルで `watch.sh` を動かすと、進み具合を2秒ごとに表示し直します。`run_all.sh` より先に起動しておいても構いません。
+
+```bash
+./scripts/watch.sh
+```
+
+```text
+12:52:54  （Ctrl+C で終了）
+
+■ 計測中
+  構成     : py-sync-block（3/9）
+  サーバ   : python（uvicorn 1ワーカー）
+  TARGET   : /sync-block
+  ユーザー : 最大 300（経過 21秒 / 45s）
+
+■ OS スレッド数（NLWP）
+    PID NLWP COMMAND
+      1   46 /usr/local/bin/python3.12 /usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
+
+■ 終わった構成（2/9、新しい順）
+  12:50:26  py-async-block
+  12:49:54  py-async-wait
+```
+
+| 項目 | 内容 |
+|---|---|
+| 計測中 | いま計測している構成と、その ID が何番目か。構成を切り替えている間は「負荷はかかっていません」と出る |
+| OS スレッド数 | サーバのプロセスごとのスレッド数（`ps` の NLWP）。gunicorn はマスターと3つのワーカーが並ぶ |
+| 終わった構成 | 結果の CSV が出そろった構成と、終わった時刻 |
+
+`watch.sh` は macOS の `date` と `ls` のオプションを使っています。Linux では時刻の表示が崩れることがあります。
+
+表示の間隔は `INTERVAL` で変えられます（既定は2秒）。1回だけ表示するなら `ONCE=1` を付けます。
+
+```bash
+INTERVAL=5 ./scripts/watch.sh
+```
+
+```bash
+ONCE=1 ./scripts/watch.sh
+```
+
 ## ファイル構成
 
 ```text
@@ -29,6 +79,8 @@ DURATION=45s ./scripts/run_all.sh
 ├── locust/locustfile.py    # 負荷シナリオ
 ├── scripts/
 │   ├── run_all.sh          # 全構成を計測する
+│   ├── watch.sh            # 計測の進み具合を表示する
+│   ├── report.py           # ログを作る
 │   └── summarize.py        # results/ を表にまとめる
 └── results/                # 計測結果（Locust の CSV・ログ、スレッド数）
 ```
@@ -120,14 +172,16 @@ curl -s localhost:8001/ping
 
 ### 負荷中のスレッド数を見る
 
-負荷をかけている間に、別のターミナルで実行します。`NLWP` 列が、プロセスごとの OS スレッド数です。
+`watch.sh` を使わずに直接見る場合は、負荷をかけている間に、別のターミナルで実行します。`NLWP` 列が、プロセスごとの OS スレッド数です。
+
+`run_all.sh` は Compose のプロジェクト名を `afbench` にしているので、`-p afbench` を付けてください。
 
 ```bash
-docker compose exec python ps -eo pid,nlwp,args
+docker compose -p afbench exec python ps -eo pid,nlwp,args
 ```
 
 ```bash
-docker compose exec go ps -eo pid,nlwp,args
+docker compose -p afbench exec go ps -eo pid,nlwp,args
 ```
 
 OS スレッド数には、イベントループやスレッドプール以外のスレッドも含まれます。このため、何もしていないときから数本あります（uvicorn 1ワーカーで6本程度）。スレッドプールで増えた分を見るときは、負荷をかける前の値と比べてください。
@@ -173,6 +227,32 @@ PY_CPU_LOOPS=15000000 GO_CPU_LOOPS=1300000000 ./scripts/run_all.sh
 | `/ping` の応答時間（中央値） | 無関係な軽いリクエストが、どれだけ巻き込まれたか |
 
 Locust の生の結果は `results/<ID>_stats.csv` と `results/<ID>.log` にあります。
+
+### ログ作成
+
+`scripts/report.py` は、構成ごとの経過をログの形にまとめ、最後に上の表を付けます。出力は Markdownです。
+
+```bash
+python3 scripts/report.py > results/report.md
+```
+
+```text
+==> py-async-block（Python / uvicorn 1ワーカー / /async-block / 最大300ユーザー）
+  経過   ユーザー    RPS   中央値（全体）
+    0秒       0     0.0   -
+   10秒     100     0.3   6.0秒
+   20秒     200     0.4   6.5秒
+   30秒     300     0.3   9.2秒
+   40秒     300     0.3   13.0秒
+  OS スレッド数の推移: 6
+  結果: RPS 0.4 / /async-block の中央値 13.0秒 / /ping の中央値 9.1秒 / 失敗 1
+```
+
+| 行 | 内容 |
+|---|---|
+| 経過ごとの行 | Locust の履歴（`<ID>_stats_history.csv`）から10秒おきに取り出した、ユーザー数・その時点の RPS・全リクエストの応答時間の中央値 |
+| OS スレッド数の推移 | 2秒おきに見たスレッド数の変わり目。gunicorn はワーカーごとの値を `/` で並べる |
+| 結果 | 計測全体の RPS と、対象・`/ping` それぞれの応答時間の中央値 |
 
 ## 検証の限界
 

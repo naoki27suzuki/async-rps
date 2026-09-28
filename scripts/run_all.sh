@@ -43,8 +43,19 @@ sample_threads() {
   done
 }
 
+# Ctrl+C で止めたときも、スレッド数を記録する裏のループを残さない
+sampler=""
+cleanup() {
+  if [ -n "$sampler" ]; then kill "$sampler" 2>/dev/null || true; fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT TERM
+
 docker compose build python go >/dev/null
+
+# 前回の結果を消してから始める（watch.sh で進み具合を数えられるように）
 mkdir -p results
+find results -type f ! -name .keep -delete
 
 # docker が標準入力を読んでもシナリオの読み込みが崩れないよう、fd 3 から読む
 while IFS='|' read -r id svc mode target users <&3; do
@@ -67,11 +78,22 @@ while IFS='|' read -r id svc mode target users <&3; do
 
   sample_threads "$svc" "results/${id}.threads" &
   sampler=$!
+  # Locust は失敗が1件でもあると終了コード1を返す。
+  # 同期で待つ構成では接続が切られることもあるので、止めずに次の構成へ進む
+  status=0
   RUN_ID=$id TARGET=$target USERS=$users HOST=$host \
-    docker compose --profile load run --rm locust >"results/${id}.log" 2>&1 </dev/null
+    docker compose --profile load run --rm locust >"results/${id}.log" 2>&1 </dev/null || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "    失敗したリクエストがあります（終了コード ${status}）。詳しくは results/${id}.log を見てください"
+  fi
+  if [ ! -f "results/${id}_stats.csv" ]; then
+    echo "    結果の CSV がありません。Locust が起動できなかった可能性があります" >&2
+  fi
   kill "$sampler" 2>/dev/null || true
   wait "$sampler" 2>/dev/null || true
+  sampler=""
 done 3<<<"$SCENARIOS"
 
 docker compose --profile load down >/dev/null 2>&1
 python3 scripts/summarize.py
+python3 scripts/report.py >results/report.md
