@@ -1,0 +1,11 @@
+# scripts/run_all.sh の計測結果（Locust の CSV・ログ・スレッド数）
+results/*
+!results/.keep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store

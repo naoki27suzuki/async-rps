@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 記事の全構成を順番に計測し、results/ に Locust の CSV とスレッド数を保存する
+# 全構成を順番に計測し、results/ に Locust の CSV とスレッド数を保存する
 set -euo pipefail
 cd "$(dirname "$0")/.."
 

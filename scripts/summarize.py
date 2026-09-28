@@ -1,4 +1,4 @@
-"""results/ の計測結果を、記事と同じ形の表（Markdown）にまとめる"""
+"""results/ の計測結果を、Markdown形式にまとめる"""
 
 import csv
 from collections import defaultdict
