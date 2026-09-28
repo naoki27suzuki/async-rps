@@ -1,6 +1,4 @@
-# FastAPI の待ち方と実行モデルの検証コード
-
-記事「FastAPI はどこで待たされていたのか ― イベントループ・スレッド・プロセスで整理する」の検証に使ったコード一式です。
+# FastAPI、Goの待ち方と実行モデルの検証コード
 
 同じ「3秒の待ち」と「CPU 処理」を、次の2つで比べます。
 
@@ -9,16 +7,10 @@
 
 ## すぐ試す
 
-Docker（Compose v2）と `curl`、`python3` があれば動きます。
+以下で実行可能で約10分ほどかかる。
 
 ```bash
-./scripts/run_all.sh
-```
-
-全9構成を順番に測り、最後に記事と同じ形の表を出します。1構成あたり約1分、全体で10分ほどかかります。短く試すなら、計測時間を縮めてください。
-
-```bash
-DURATION=15s ./scripts/run_all.sh
+DURATION=45s ./scripts/run_all.sh
 ```
 
 ## ファイル構成
@@ -43,7 +35,7 @@ DURATION=15s ./scripts/run_all.sh
 
 ## 計測する構成
 
-| ID | 記事の構成 | サーバ | 起動方法 | エンドポイント | ユーザー数 |
+| ID | 構成 | サーバ | 起動方法 | エンドポイント | ユーザー数 |
 |---|---|---|---|---|---|
 | `py-async-wait` | シングルプロセス × シングルスレッド（非同期で待つ） | Python | uvicorn 1ワーカー | `/async-wait` | 300 |
 | `py-async-block` | シングルプロセス × シングルスレッド（同期で待つ） | Python | uvicorn 1ワーカー | `/async-block` | 300 |
@@ -55,7 +47,6 @@ DURATION=15s ./scripts/run_all.sh
 | `py-cpu-sync` | CPU 処理（`def`） | Python | uvicorn 1ワーカー | `/cpu-sync` | 10 |
 | `go-cpu` | （参考）Go の CPU 処理 | Go | `GOMAXPROCS=1` | `/cpu` | 10 |
 
-`go-cpu` は記事には載せていない参考値です。
 
 ## エンドポイント
 
@@ -119,53 +110,13 @@ curl -s localhost:8001/ping
 
 | 項目 | 値 |
 |---|---|
-| マシン / OS | （記入） |
+| マシン / OS | macOS |
 | Docker | （記入） |
 | Python | 3.12 |
 | FastAPI / uvicorn / gunicorn | （記入：`docker compose exec python pip freeze`） |
 | Go | 1.24 |
 | Locust | （記入：`docker compose run --rm locust --version`） |
 
-## 手で動かす
-
-`run_all.sh` を使わずに、1構成ずつ測ることもできます。
-
-### Python
-
-```bash
-# uvicorn 1ワーカー（シングルプロセス）
-docker compose up -d --build python
-```
-
-```bash
-# gunicorn 3ワーカー（マルチプロセス）
-APP_CMD="gunicorn main:app -w 3 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:8000" docker compose up -d --build --force-recreate python
-```
-
-```bash
-TARGET=/async-block docker compose --profile load run --rm locust
-```
-
-```bash
-# CPU 処理は10ユーザー
-TARGET=/cpu-sync USERS=10 docker compose --profile load run --rm locust
-```
-
-### Go
-
-```bash
-docker compose up -d --build go
-```
-
-```bash
-TARGET=/sleep HOST=http://go:8000 docker compose --profile load run --rm locust
-```
-
-`GOMAXPROCS` は環境変数で変えられます（既定は1）。
-
-```bash
-GOMAXPROCS=2 docker compose up -d --force-recreate go
-```
 
 ### 負荷中のスレッド数を見る
 
@@ -189,7 +140,7 @@ docker compose --profile load down
 
 ## CPU 処理の重さを合わせる
 
-記事では、CPU 処理を「1コアで約0.4秒」にしています。ループの回数は環境変数で変えられるので、負荷をかけずに1回叩いて、0.4秒前後になるよう調整してください。
+CPU 処理を「1コアで約0.4秒」にしています。ループの回数は環境変数で変えられるので、負荷をかけずに1回叩いて、0.4秒前後になるよう調整してください。
 
 ```bash
 time curl -s localhost:8000/cpu-sync
